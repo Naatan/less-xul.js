@@ -17,9 +17,9 @@ SRC = lib/less
 HEADER = build/header.js
 VERSION = `cat package.json | grep version \
 														| grep -o '[0-9]\.[0-9]\.[0-9]\+'`
-DIST = dist/less-${VERSION}.js
-RHINO = dist/less-rhino-${VERSION}.js
-DIST_MIN = dist/less-${VERSION}.min.js
+DIST = dist/less-xul-${VERSION}.js
+RHINO = dist/less-xul-rhino-${VERSION}.js
+DIST_MIN = dist/less-xul-${VERSION}.min.js
 
 less:
 	@@mkdir -p dist
