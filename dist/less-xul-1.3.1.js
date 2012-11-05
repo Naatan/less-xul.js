@@ -595,7 +595,7 @@ less.Parser = function Parser(env) {
                     ]
                 };
             }
-
+            
             if (this.imports.queue.length > 0) {
                 finish = function (e) {
                     if (e) callback(e);
@@ -814,7 +814,7 @@ less.Parser = function Parser(env) {
                     var name, index = i;
 
                     if (input.charAt(i) === '@' && (name = $(/^@@?[\w-]+/))) {
-                        return new(tree.Variable)(name, index, env.filename);
+                        return new(tree.Variable)(name, index, env.filename, env.sheet);
                     }
                 },
 
@@ -823,7 +823,7 @@ less.Parser = function Parser(env) {
                     var name, curly, index = i;
 
                     if (input.charAt(i) === '@' && (curly = $(/^@\{([\w-]+)\}/))) {
-                        return new(tree.Variable)("@" + curly[1], index, env.filename);
+                        return new(tree.Variable)("@" + curly[1], index, env.filename, env.sheet);
                     }
                 },
 
@@ -3205,11 +3205,12 @@ tree.Shorthand.prototype = {
 })(require('../tree'));
 (function (tree) {
 
-tree.Ruleset = function (selectors, rules, strictImports) {
+tree.Ruleset = function (selectors, rules, strictImports, sheet) {
     this.selectors = selectors;
     this.rules = rules;
     this._lookups = {};
     this.strictImports = strictImports;
+    this.sheet = sheet;
 };
 tree.Ruleset.prototype = {
     eval: function (env) {
@@ -3701,7 +3702,7 @@ tree.Value.prototype = {
 })(require('../tree'));
 (function (tree) {
 
-tree.Variable = function (name, index, file) { this.name = name, this.index = index, this.file = file };
+tree.Variable = function (name, index, file, sheet) { this.name = name, this.index = index, this.file = file, this.sheet = sheet };
 tree.Variable.prototype = {
     eval: function (env) {
         var variable, v, name = this.name;
@@ -3723,7 +3724,14 @@ tree.Variable.prototype = {
             if (v = frame.variable(name)) {
                 return v.value.eval(env);
             }
-        })) { 
+        })) {
+            var _name = name.substr(1);
+            if (less.variables[_name] === undefined) {
+                less.variables[_name] = [];
+            }
+            
+            less.variables[_name].push(extractIdFromSheet(this.sheet));
+            
             this.evaluating = false;
             return variable;
         }
@@ -3845,6 +3853,7 @@ if (/!watch/.test(location.hash)) {
 }
 
 var cache = null;
+var localCache = {};
 
 if (less.env != 'development') {
     try {
@@ -3859,6 +3868,9 @@ var links = document.getElementsByTagName('link');
 var typePattern = /^text\/(x-)?less$/;
 
 less.sheets = [];
+less.variables = {};
+less.variableStorage = {};
+less.sheetmap = {};
 
 for (var i = 0; i < links.length; i++) {
     if (links[i].getAttribute("rel") === 'stylesheet/less' || (links[i].getAttribute("rel").match(/stylesheet/) &&
@@ -3872,6 +3884,7 @@ for (var i = 0; i < links.length; i++) {
         }
         
         less.sheets.push(sheet);
+		less.sheetmap[extractIdFromSheet(sheet)] = sheet;
     }
 }
 
@@ -3897,7 +3910,88 @@ less.refreshStyles = loadStyles;
 
 less.refresh(less.env === 'development');
 
+less.updateVariables = function(variables, sheetUrl) {
+	var sheetUpdates = {};
+	var len = 0;
+	
+	// Merge variableStorage into variables
+	for (var name in less.variableStorage) {
+		if ( ! less.variableStorage.hasOwnProperty(name) || variables[name] !== undefined) {
+			continue;
+		}
+		variables[name] = less.variableStorage[name];
+	}
+	less.variableStorage = variables;
+	
+	// Iterate through variables and filter out the sheets that are affected
+	for (var name in variables) {
+		if ( ! variables.hasOwnProperty(name) || less.variables[name] === undefined) {
+			continue;
+		}
+		
+		// Get sheet id's that are connected to this varialble
+		var sheets = less.variables[name];
+		
+		for (var i=0;i<sheets.length;i++) {
+			if (sheetUrl) { // If a sheet url was defined only process sheets that have a matching url
+				var _sheet = less.sheetmap[sheets[i]];
+				if (_sheet.href.indexOf(sheetUrl) === -1) {
+					continue;
+				}
+			}
+			if (sheetUpdates[sheets[i]] == undefined)
+			{
+				sheetUpdates[sheets[i]] = {sheet: less.sheetmap[sheets[i]], variables: []};
+				len++;
+			}
+			sheetUpdates[sheets[i]].variables.push({name: name, value: variables[name]})
+		}
+		
+	}
+
+	// Iterate though sheets an update (recompile) them with new variables
+	for (id in sheetUpdates) {
+		if (localCache[id] === undefined) continue;
+		
+		var sheet 		= sheetUpdates[id].sheet;
+		var contents  	= sheet.contents || {}; 
+		var href 		= sheet.href;
+		var css 		= _injectVariables(sheetUpdates[id].variables, localCache[id]);
+		
+		try {
+			contents[href] = css;
+			new(less.Parser)({
+				optimization: less.optimization,
+				paths: [sheet.href.replace(/[\w\.-]+$/, '')],
+				mime: sheet.type,
+				filename: href,
+				sheet: sheet,
+				'contents': contents,
+				dumpLineNumbers: less.dumpLineNumbers
+			}).parse(css, function (e, root) {
+				if (e) { return error(e, href) }
+				try {
+					createCSS(root.toCSS(), sheet);
+					removeNode(document.getElementById('less-error-message:' + extractId(href)));
+				} catch (e) {
+					error(e, href);
+				}
+			});
+		} catch (e) {
+			error(e, href);
+		}
+	}
+}
+
 function loadStyles() {
+	if (cache) {
+		if (cache.getItem('lessVariables')) {
+			less.variables = JSON.parse(cache.getItem('lessVariables'));
+		}
+		if (cache.getItem('lessRawCache')) {
+			localCache = JSON.parse(cache.getItem('lessRawCache'));
+		}
+	}
     var styles = document.getElementsByTagName('style');
     for (var i = 0; i < styles.length; i++) {
         if (styles[i].type.match(typePattern)) {
@@ -3956,9 +4050,11 @@ function loadStyleSheet(sheet, callback, reload, remaining) {
                     paths: [href.replace(/[\w\.-]+$/, '')],
                     mime: sheet.type,
                     filename: href,
+					sheet: sheet,
                     'contents': contents,    // Passing top importing parser content cache ref down.
                     dumpLineNumbers: less.dumpLineNumbers
                 }).parse(data, function (e, root) {
+					localCache[extractIdFromSheet(sheet)] = data;
                     if (e) { return error(e, href) }
                     try {
                         callback(e, root, data, sheet, { local: false, lastModified: lastModified, remaining: remaining });
@@ -3983,6 +4079,33 @@ function extractId(href) {
                .replace(/\.[^\.\/]+$/,         '' )  // Remove file extension
                .replace(/[^\.\w-]+/g,          '-')  // Replace illegal characters
                .replace(/\./g,                 ':'); // Replace dots with colons(for valid id)
+}
+
+function extractIdFromSheet(sheet) {
+	var href = sheet.href ? sheet.href.replace(/\?.*$/, '') : '';
+	return 'less:' + (sheet.title || extractId(href));
+}
+
+function _injectVariables(variables, css) {
+	console.log(css);
+	for (var i=0;i<variables.length;i++) {
+		var _var = variables[i];
+		var regex = new RegExp("(\\@"+_var.name+"\\:\\s?)(.*?)\\;", "g");
+		
+		if (css.match(regex) === null) {
+			var _prepend = "@"+_var.name+": "+_var.value+";\n";
+			
+			if (css.match(/\@import\s/) !== null) {
+				css = css.replace(/(.*\@import\s.*?\n)/, "$1\n"+_prepend+"\n");
+			} else {
+				css = _prepend + css;
+			}
+		} else {
+			css = css.replace(regex, '$1'+_var.value+';');	
+		}
+	}
+	console.log(css);
+	return css;
 }
 
 function createCSS(styles, sheet, lastModified) {
@@ -4021,6 +4144,8 @@ function createCSS(styles, sheet, lastModified) {
         try {
             cache.setItem(href, styles);
             cache.setItem(href + ':timestamp', lastModified);
+			cache.setItem('lessVariables', JSON.stringify(less.variables));
+			cache.setItem('lessRawCache', JSON.stringify(localCache));
         } catch(e) {
             //TODO - could do with adding more robust error handling
             log('failed to save');
