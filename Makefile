@@ -17,6 +17,7 @@ SRC = lib/less
 HEADER = build/header.js
 VERSION = `cat package.json | grep version \
 														| grep -o '[0-9]\.[0-9]\.[0-9]\+'`
+LATEST = dist/less-latest.js
 DIST = dist/less-${VERSION}.js
 RHINO = dist/less-rhino-${VERSION}.js
 DIST_MIN = dist/less-${VERSION}.min.js
@@ -37,6 +38,7 @@ less:
 	      build/amd.js >> ${DIST}
 	@@echo "})(window);" >> ${DIST}
 	@@echo ${DIST} built.
+	@@cp ${DIST} ${LATEST}
 
 rhino:
 	@@mkdir -p dist

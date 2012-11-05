@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta http-equiv="content-type" content="text/html; charset=UTF-8">
+	<title>Test less.js Dynamic Features</title>
+	<link rel="stylesheet/less" type="text/css" href="style1.less">
+	<link rel="stylesheet/less" type="text/css" href="style2.less">
+	<script type='text/javascript' src="../../dist/less-latest.js"></script>
+</head>
+<body>
+	<div class="style1_var1">style1 - @var1</div>
+	<div class="style1_var2">style1 - @var2</div>
+	<div class="style1_var3">style1 - @var3</div>
+	<div class="style1_var4">style1 - @var4</div>
+	<div class="style1_var5">style1 - @var5</div>
+	<br/>
+	<div class="style2_var1">style2 - @var1</div>
+	<div class="style2_var2">style2 - @var2</div>
+	<div class="style2_var3">style2 - @var3</div>
+	<div class="style2_var4">style2 - @var4</div>
+	<div class="style2_var5">style2 - @var5</div>
+	<br/>
+	<select name="varName">
+		<option value="var1">@var1</option>
+		<option value="var2">@var2</option>
+		<option value="var3">@var3</option>
+		<option value="var4">@var4</option>
+		<option value="var5">@var5</option>
+	</select>
+	<select name="sheetUrl">
+		<option value="">all</option>
+		<option>style1</option>
+		<option>style2</option>
+	</select>
+	<input name="varValue" placeholder="value"/>
+	<input type="submit" value="set"/>
+	
+	<script src="//ajax.googleapis.com/ajax/libs/jquery/1.8.2/jquery.min.js"></script>
+	<script type="application/x-javascript">
+	$("input[type=submit]").click(function() {
+		var _ob 		= {};
+		var varName 	= $("select[name=varName]").val();
+		var varValue 	= $("input[name=varValue]").val();
+		var sheetUrl 	= $("select[name=sheetUrl]").val();
+		_ob[varName] = varValue;
+		
+		less.updateVariables(_ob, sheetUrl == '' ? false : sheetUrl);
+	});
+	</script>
+	
+</body>
+</html>
