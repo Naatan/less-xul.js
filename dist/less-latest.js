@@ -3746,6 +3746,7 @@ tree.Variable.prototype = {
 
 })(require('../tree'));
 (function (tree) {
+
 tree.debugInfo = function(env, ctx) {
     var result="";
     if (env.dumpLineNumbers && !env.compress) {
@@ -4078,12 +4079,24 @@ function extractIdFromSheet(sheet) {
 }
 
 function _injectVariables(variables, css) {
+	console.log(css);
 	for (var i=0;i<variables.length;i++) {
 		var _var = variables[i];
 		var regex = new RegExp("(\\@"+_var.name+"\\:\\s?)(.*?)\\;", "g");
-		css = css.replace(regex, '$1'+_var.value+';');	
+		
+		if (css.match(regex) === null) {
+			var _prepend = "@"+_var.name+": "+_var.value+";\n";
+			
+			if (css.match(/\@import\s/) !== null) {
+				css = css.replace(/(.*\@import\s.*?\n)/, "$1\n"+_prepend+"\n");
+			} else {
+				css = _prepend + css;
+			}
+		} else {
+			css = css.replace(regex, '$1'+_var.value+';');	
+		}
 	}
-	
+	console.log(css);
 	return css;
 }
 
