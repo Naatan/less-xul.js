@@ -3168,7 +3168,7 @@ tree.Rule = function (name, value, important, index, inline) {
     } else { this.variable = false }
 };
 tree.Rule.prototype.toCSS = function (env) {
-    if (this.variable) { return "" }
+    if (this.variable || this.value.value == 'false') { return "" }
     else {
         return this.name + (env.compress ? ':' : ': ') +
                this.value.toCSS(env) +
@@ -3736,10 +3736,8 @@ tree.Variable.prototype = {
             return variable;
         }
         else {
-            throw { type: 'Name',
-                    message: "variable " + name + " is undefined",
-                    filename: this.file,
-                    index: this.index };
+            log("Warning: variable " + name + " ("+this.file+":"+this.index+") is undefined");
+            return false;
         }
     }
 };
