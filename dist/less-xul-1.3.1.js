@@ -4183,21 +4183,19 @@ function removeNode(node) {
 }
 
 function log(str) {
-    if (less.env == 'development' && typeof(console) !== "undefined") { console.log('less: ' + str) }
+    if (less.env == 'development' && typeof(dump) !== "undefined") { dump('less: ' + str + "\n"); }
 }
 
 function error(e, href) {
     var id = 'less-error-message:' + extractId(href);
-    var template = '<li><label>{line}</label><pre class="{class}">{content}</pre></li>';
-    var elem = document.createElement('div'), timer, content, error = [];
+    var template = ' - {line}: {content}' + "\n";
+	var errorString = 'LESS ERROR - ' + "\n\n";
     var filename = e.filename || href;
     var filenameNoPath = filename.match(/([^\/]+)$/)[1];
+	var error = [];
 
-    elem.id        = id;
-    elem.className = "less-error-message";
-
-    content = '<h3>'  + (e.message || 'There is an error in your .less file') +
-              '</h3>' + '<p>in <a href="' + filename   + '">' + filenameNoPath + "</a> ";
+    errorString += (e.message || 'There is an error in your .less file') + "\n" +
+              'in ' + filenameNoPath + "\n\n";
 
     var errorline = function (e, i, classname) {
         if (e.extract[i]) {
@@ -4208,80 +4206,15 @@ function error(e, href) {
     };
 
     if (e.stack) {
-        content += '<br/>' + e.stack.split('\n').slice(1).join('<br/>');
+        errorString += "\n" + e.stack.split('\n').slice(1).join("\n");
     } else if (e.extract) {
         errorline(e, 0, '');
         errorline(e, 1, 'line');
         errorline(e, 2, '');
-        content += 'on line ' + e.line + ', column ' + (e.column + 1) + ':</p>' +
-                    '<ul>' + error.join('') + '</ul>';
+        errorString += 'on line ' + e.line + ', column ' + (e.column + 1) + ':' + "\n" +
+                    error.join('');
     }
-    elem.innerHTML = content;
-
-    // CSS for error messages
-    createCSS([
-        '.less-error-message ul, .less-error-message li {',
-            'list-style-type: none;',
-            'margin-right: 15px;',
-            'padding: 4px 0;',
-            'margin: 0;',
-        '}',
-        '.less-error-message label {',
-            'font-size: 12px;',
-            'margin-right: 15px;',
-            'padding: 4px 0;',
-            'color: #cc7777;',
-        '}',
-        '.less-error-message pre {',
-            'color: #dd6666;',
-            'padding: 4px 0;',
-            'margin: 0;',
-            'display: inline-block;',
-        '}',
-        '.less-error-message pre.line {',
-            'color: #ff0000;',
-        '}',
-        '.less-error-message h3 {',
-            'font-size: 20px;',
-            'font-weight: bold;',
-            'padding: 15px 0 5px 0;',
-            'margin: 0;',
-        '}',
-        '.less-error-message a {',
-            'color: #10a',
-        '}',
-        '.less-error-message .error {',
-            'color: red;',
-            'font-weight: bold;',
-            'padding-bottom: 2px;',
-            'border-bottom: 1px dashed red;',
-        '}'
-    ].join('\n'), { title: 'error-message' });
-
-    elem.style.cssText = [
-        "font-family: Arial, sans-serif",
-        "border: 1px solid #e00",
-        "background-color: #eee",
-        "border-radius: 5px",
-        "-webkit-border-radius: 5px",
-        "-moz-border-radius: 5px",
-        "color: #e00",
-        "padding: 15px",
-        "margin-bottom: 15px"
-    ].join(';');
-
-    if (less.env == 'development') {
-        timer = setInterval(function () {
-            if (document.body) {
-                if (document.getElementById(id)) {
-                    document.body.replaceChild(elem, document.getElementById(id));
-                } else {
-                    document.body.insertBefore(elem, document.body.firstChild);
-                }
-                clearInterval(timer);
-            }
-        }, 10);
-    }
+    dump(errorString);
 }
 
 // amd.js
