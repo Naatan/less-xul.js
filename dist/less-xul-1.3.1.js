@@ -3736,7 +3736,9 @@ tree.Variable.prototype = {
             return variable;
         }
         else {
-            log("Warning: variable " + name + " ("+this.file+":"+this.index+") is undefined");
+            ko.logging.dumpImportant(input);
+            var loc = getLocation(index, input);
+            log("Warning: variable " + name + " ("+this.file+":"+loc+") is undefined");
             return false;
         }
     }
