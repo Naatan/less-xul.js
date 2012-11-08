@@ -3736,9 +3736,7 @@ tree.Variable.prototype = {
             return variable;
         }
         else {
-            ko.logging.dumpImportant(input);
-            var loc = getLocation(index, input);
-            log("Warning: variable " + name + " ("+this.file+":"+loc+") is undefined");
+            log("Warning: variable " + name + " ("+this.file+") is undefined");
             return false;
         }
     }
@@ -3864,7 +3862,6 @@ if (less.env != 'development') {
 //
 // Get all <link> tags with the 'rel' attribute set to "stylesheet/less"
 //
-var links = document.getElementsByTagName('link');
 var typePattern = /^text\/(x-)?less$/;
 
 less.sheets = [];
@@ -3872,20 +3869,30 @@ less.variables = {};
 less.variableStorage = {};
 less.sheetmap = {};
 
+var attrMatch = '([a-z]*?)="([a-z0-9:/-_.]*)"';
+var links = [];
+var _i, _len, _ref, child, pi;
+for (_i = 0, _len = (_ref = document.childNodes).length; _i < _len; _i++) {
+	child = _ref[_i];
+	if (child.nodeName == 'xml-stylesheet' && child.nodeValue.match(/media=\"(?:\s*?|[a-z]*?\s+)less/)) {
+		ko.logging.dumpImportant(child.nodeValue, 'value');
+		var attributes = child.nodeValue.match(new RegExp(attrMatch, 'gi'));
+		
+		for (var x=0;x<attributes.length;x++) {
+			var attribute = attributes[x].match(new RegExp(attrMatch, 'i'));
+			ko.logging.dumpMixed(attribute);
+			child[attribute[1]] = attribute[2];
+		}
+		
+		links.push(child);
+		ko.logging.dumpImportant(child.href);
+	}
+}
+
 for (var i = 0; i < links.length; i++) {
-    if (links[i].getAttribute("rel") === 'stylesheet/less' || (links[i].getAttribute("rel").match(/stylesheet/) &&
-       (links[i].type.match(typePattern)))) {
-        
-        var sheet = links[i];
-        var attributes = sheet.attributes;
-        for (var x=0;x<attributes.length;x++)
-        {
-            sheet[attributes[x].name] = attributes[x].value;
-        }
-        
-        less.sheets.push(sheet);
-		less.sheetmap[extractIdFromSheet(sheet)] = sheet;
-    }
+	var sheet = links[i];
+	less.sheets.push(sheet);
+	less.sheetmap[extractIdFromSheet(sheet)] = sheet;
 }
 
 less.refresh = function (reload) {
@@ -4014,6 +4021,7 @@ function loadStyles() {
 
 function loadStyleSheets(callback, reload) {
     for (var i = 0; i < less.sheets.length; i++) {
+		ko.logging.dumpImportant(extractIdFromSheet(less.sheets[i]));
         loadStyleSheet(less.sheets[i], callback, reload, less.sheets.length - (i + 1));
     }
 }
@@ -4109,7 +4117,7 @@ function _injectVariables(variables, css) {
 }
 
 function createCSS(styles, sheet, lastModified) {
-    if (sheet.tagName != 'link') return;
+    if ( ! sheet.nodeName.match(/link|xml-stylesheet/i)) return;
     
     var css;
 
@@ -4117,26 +4125,18 @@ function createCSS(styles, sheet, lastModified) {
     var href = sheet.href ? sheet.href.replace(/\?.*$/, '') : '';
 
     // If there is no title set, use the filename, minus the extension
-    var id = 'less:' + (sheet.title || extractId(href));
-    
-    var _i, _len, _ref, child, pi, _lastChild;
-    for (_i = 0, _len = (_ref = document.childNodes).length; _i < _len; _i++) {
-        child = _ref[_i];
-        if (child.nodeType === Node.PROCESSING_INSTRUCTION_NODE && child.nodeValue.indexOf(id) > 0) {
-            child.nodeValue = 'discard="discard"';
-            document.removeChild(child);
-            break;
-        }
-        else if (child.nodeName == 'xml-stylesheet')
-        {
-            _lastChild = child;
-        }
-    }
-    
-    css = document.createProcessingInstruction('xml-stylesheet', "type=\"text/css\"\nid=\""+id+"\"\
-                                               href=\"data:text/css," + (encodeURIComponent(styles)) + "\"");
-    
-    _lastChild.parentNode.insertBefore(css, _lastChild);
+    var id = extractIdFromSheet(sheet);
+	var sibling = sheet.nextSibling || {};
+	
+	if (sibling.nodeValue !== undefined && sibling.nodeValue.indexOf(id) !== -1) {
+		ko.logging.dumpImportant(id, 'modify');
+		sibling.nodeValue.replace(/(href=")(.*?)"/i, '$1'+encodeURIComponent(styles)+'"');
+	} else {
+		css = document.createProcessingInstruction('xml-stylesheet', "type=\"text/css\"\nid=\""+id+"\"\
+												   href=\"data:text/css," + (encodeURIComponent(styles)) + "\"");
+		ko.logging.dumpMixed(sheet);
+		sheet.parentNode.insertBefore(css, sheet);
+	}
 
     // Don't update the local store if the file wasn't modified
     if (lastModified && cache) {
@@ -4189,13 +4189,12 @@ function log(str) {
 function error(e, href) {
     var id = 'less-error-message:' + extractId(href);
     var template = ' - {line}: {content}' + "\n";
-	var errorString = 'LESS ERROR - ' + "\n\n";
+	var errorString = ' - LESS ERROR - ' + "\n";
     var filename = e.filename || href;
     var filenameNoPath = filename.match(/([^\/]+)$/)[1];
 	var error = [];
 
-    errorString += (e.message || 'There is an error in your .less file') + "\n" +
-              'in ' + filenameNoPath + "\n\n";
+    errorString += (e.message || 'There is an error in your .less file') + ' (' + filenameNoPath + ")\n";
 
     var errorline = function (e, i, classname) {
         if (e.extract[i]) {
