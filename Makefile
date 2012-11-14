@@ -35,6 +35,7 @@ less:
 	      ${SRC}/browser.js\
 	      build/amd.js >> ${DIST}
 	@@echo "})(window);" >> ${DIST}
+	@@cp ${SRC}/loader.js dist/loader.js
 	@@echo ${DIST} built.
 
 min: less
