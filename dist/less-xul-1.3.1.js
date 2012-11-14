@@ -3850,14 +3850,26 @@ if (/!watch/.test(location.hash)) {
 	less.watch();
 }
 
-var cache = null;
-var localCache = {};
+var _cache = {};
+less.cache = _cache;
 
-if (less.env != 'development') {
-    try {
-        cache = (typeof(window.localStorage) === 'undefined') ? null : window.localStorage;
-    } catch (_) {}
-}
+var cache = new function() {
+	this.pointer = window.parent.less === undefined ? _cache : window.parent.less.cache;
+	
+	less.cache = this.pointer;
+	
+	this.getItem = function(itemName) {
+		if (this.pointer[itemName] !== undefined) {
+			return this.pointer[itemName];
+		} else {
+			return undefined;
+		}
+	};
+	this.setItem = function(itemName, itemValue) {
+		this.pointer[itemName] = itemValue;
+	}
+};
+var localCache = {};
 
 //
 // Get all <link> tags with the 'rel' attribute set to "stylesheet/less"
@@ -4030,42 +4042,40 @@ function loadStyleSheet(sheet, callback, reload, remaining) {
             href = url.slice(0, url.lastIndexOf('/') + 1) + href;
         }
     }
-    xhr(sheet.href, sheet.type, function (data, lastModified) {
-        if (!reload && styles && lastModified &&
-           (new(Date)(lastModified).valueOf() ===
-            new(Date)(styles.timestamp).valueOf())) {
-            // Use local copy
-            createCSS(styles.css, sheet);
-            callback(null, null, data, sheet, { local: true, remaining: remaining });
-        } else {
-            // Use remote copy (re-parse)
-            try {
-                contents[href] = data;  // Updating top importing parser content cache
-                new(less.Parser)({
-                    optimization: less.optimization,
-                    paths: [href.replace(/[\w\.-]+$/, '')],
-                    mime: sheet.type,
-                    filename: href,
+	
+	if (styles.css) {
+		createCSS(styles.css, sheet);
+		callback(null, null, null, sheet, { local: true, remaining: remaining });
+	} else {
+		xhr(sheet.href, sheet.type, function (data, lastModified) {
+			// Use remote copy (re-parse)
+			try {
+				contents[href] = data;  // Updating top importing parser content cache
+				new(less.Parser)({
+					optimization: less.optimization,
+					paths: [href.replace(/[\w\.-]+$/, '')],
+					mime: sheet.type,
+					filename: href,
 					sheet: sheet,
-                    'contents': contents,    // Passing top importing parser content cache ref down.
-                    dumpLineNumbers: less.dumpLineNumbers
-                }).parse(data, function (e, root) {
+					'contents': contents,    // Passing top importing parser content cache ref down.
+					dumpLineNumbers: less.dumpLineNumbers
+				}).parse(data, function (e, root) {
 					localCache[extractIdFromSheet(sheet)] = data;
-                    if (e) { return error(e, href) }
-                    try {
-                        callback(e, root, data, sheet, { local: false, lastModified: lastModified, remaining: remaining });
-                        removeNode(document.getElementById('less-error-message:' + extractId(href)));
-                    } catch (e) {
-                        error(e, href);
-                    }
-                });
-            } catch (e) {
-                error(e, href);
-            }
-        }
-    }, function (status, url) {
-        throw new(Error)("Couldn't load " + url + " (" + status + ")");
-    });
+					if (e) { return error(e, href) }
+					try {
+						callback(e, root, data, sheet, { local: false, lastModified: lastModified, remaining: remaining });
+						removeNode(document.getElementById('less-error-message:' + extractId(href)));
+					} catch (e) {
+						error(e, href);
+					}
+				});
+			} catch (e) {
+				error(e, href);
+			}
+		}, function (status, url) {
+			throw new(Error)("Couldn't load " + url + " (" + status + ")");
+		});
+	}
 }
 
 function extractId(href) {
@@ -4126,18 +4136,16 @@ function createCSS(styles, sheet, lastModified) {
 	}
 
     // Don't update the local store if the file wasn't modified
-    if (lastModified && cache) {
-        log('saving ' + href + ' to cache.');
-        try {
-            cache.setItem(href, styles);
-            cache.setItem(href + ':timestamp', lastModified);
-			cache.setItem('lessVariables', JSON.stringify(less.variables));
-			cache.setItem('lessLocalCache', JSON.stringify(localCache));
-        } catch(e) {
-            //TODO - could do with adding more robust error handling
-            log('failed to save');
-        }
-    }
+	log('saving ' + href + ' to cache.');
+	try {
+		cache.setItem(href, styles);
+		cache.setItem(href + ':timestamp', lastModified);
+		cache.setItem('lessVariables', JSON.stringify(less.variables));
+		cache.setItem('lessLocalCache', JSON.stringify(localCache));
+	} catch(e) {
+		//TODO - could do with adding more robust error handling
+		log('failed to save');
+	}
 }
 
 function xhr(url, type, callback, errback) {
