@@ -3879,9 +3879,6 @@ var typePattern = /^text\/(x-)?less$/;
 less.variables = {};
 less.variableStorage = {};
 
-//less.sheets = [];
-//less.sheetmap = {};
-
 less.context = null;
 less.contextStorage = null;
 
@@ -3961,10 +3958,6 @@ less.refresh = function (reload) {
 		
     }, reload);
 };
-
-less.restoreContext();
-
-less.refresh(less.env === 'development');
 
 less.inject = function(lessCss) {
 	new(less.Parser)({
@@ -4053,6 +4046,10 @@ less.updateVariables = function(variables, sheetUrl) {
 		}
 	}
 }
+
+less.restoreContext();
+
+less.refresh(less.env === 'development');
 
 function loadStyleSheets(callback, reload) {
     for (var i = 0; i < less.contextStorage.sheets.length; i++) {
@@ -4212,7 +4209,13 @@ function removeNode(node) {
 }
 
 function log(str) {
-    if (less.env == 'development' && typeof(dump) !== "undefined") { dump('less: ' + str + "\n"); }
+	if (typeof ko !== 'undefined') {
+		var log = ko.logging.getLogger('lessCss');
+		log.debug(str);
+	} else {
+		if (less.env != 'development' || typeof(dump) !== "undefined") { return false; }
+		dump('less: ' + str + "\n");
+	}
 }
 
 function error(e, href) {
@@ -4242,7 +4245,8 @@ function error(e, href) {
         errorString += 'on line ' + e.line + ', column ' + (e.column + 1) + ':' + "\n" +
                     error.join('');
     }
-    dump(errorString);
+	
+	dump(errorString);
 }
 
 // amd.js
