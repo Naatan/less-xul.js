@@ -3168,7 +3168,7 @@ tree.Rule = function (name, value, important, index, inline) {
     } else { this.variable = false }
 };
 tree.Rule.prototype.toCSS = function (env) {
-    if (this.variable || this.value.value == 'false') { return "" }
+    if (this.variable) { return "" }
     else {
         return this.name + (env.compress ? ':' : ': ') +
                this.value.toCSS(env) +
@@ -3736,8 +3736,10 @@ tree.Variable.prototype = {
             return variable;
         }
         else {
-            log("Warning: variable " + name + " ("+this.file+") is undefined");
-            return false;
+            throw { type: 'Name',
+                    message: "variable " + name + " is undefined",
+                    filename: this.file,
+                    index: this.index };
         }
     }
 };
@@ -4210,8 +4212,7 @@ function removeNode(node) {
 
 function log(str) {
 	if (typeof ko !== 'undefined') {
-		var log = ko.logging.getLogger('lessCss');
-		log.debug(str);
+		ko.logging.getLogger('lessCss').debug(str);
 	} else {
 		if (less.env != 'development' || typeof(dump) !== "undefined") { return false; }
 		dump('less: ' + str + "\n");
