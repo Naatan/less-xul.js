@@ -219,6 +219,16 @@ less.Parser = function Parser(env) {
         push: function (path, callback) {
             var that = this;
             this.queue.push(path);
+            
+            // Record parent
+            var pId = extractIdFromSheet(env.sheet);
+            var id  = extractId(path);
+            
+            if (typeof less.sheetParents[id] == 'undefined') {
+                less.sheetParents[id] = {};
+            }
+            
+            less.sheetParents[id][pId] = true;
 
             //
             // Import a file asynchronously
@@ -1274,6 +1284,13 @@ less.Parser = function Parser(env) {
                 if (c === '.' || c === '#' || c === '&') { return }
 
                 if (name = $(this.variable) || $(this.property)) {
+                    if (name.charAt(0) == '@') {
+                        var _name = name.substr(1);
+                        if (typeof less.variables[_name] == 'undefined') {
+                            less.variables[_name] = {};
+                        }
+                        less.variables[_name][extractIdFromSheet(env.sheet)] = true;
+                    }
                     if ((name.charAt(0) != '@') && (match = /^([^@+\/'"*`(;{}-]*);/.exec(chunks[j]))) {
                         i += match[0].length - 1;
                         value = new(tree.Anonymous)(match[1]);
@@ -1616,7 +1633,7 @@ if (less.mode === 'browser' || less.mode === 'rhino') {
             } else {
                 callback.apply(null, arguments);
             }
-        }, true);
+        }, true, 0, true);
     };
 }
 
@@ -3725,13 +3742,6 @@ tree.Variable.prototype = {
                 return v.value.eval(env);
             }
         })) {
-            var _name = name.substr(1);
-            if (typeof less.variables[_name] == 'undefined') {
-                less.variables[_name] = {};
-            }
-            
-            less.variables[_name][extractIdFromSheet(this.sheet)] = true;
-            
             this.evaluating = false;
             return variable;
         }
@@ -3892,13 +3902,23 @@ var cache = new function() {
 		}, 200);
 	};
 };
-less._fileCache = {};
 
+var getSheet = function(sheetId) {
+	if (typeof less.contextStorage.sheetmap[sheetId] != 'undefined') {
+		return less.contextStorage.sheetmap[sheetId];
+	} else if (typeof _sheetIdMap[sheetId] != 'undefined') {
+		return {href: _sheetIdMap[sheetId], type: 'text/css'};
+	} else {
+		return false;
+	}
+}
+
+var _fileCache = {};
 var getFile = function(fileUri, cache) {
 	var _fileUri = cache ? "cache_" + fileUri : fileUri;
 	
-	if (typeof less._fileCache[_fileUri] !== 'undefined')  {
-		return less._fileCache[_fileUri];
+	if (typeof _fileCache[_fileUri] !== 'undefined')  {
+		return _fileCache[_fileUri];
 	}
 	
 	if (/^[a-z]*\:\/\//.test(fileUri)) {
@@ -3931,15 +3951,15 @@ var getFile = function(fileUri, cache) {
 		filePath = filePath.split('/');
 		filePath.unshift("lessCache");
 		
-		less._fileCache[_fileUri] = FileUtils.getFile("ProfD", filePath, true);
+		_fileCache[_fileUri] = FileUtils.getFile("ProfD", filePath, true);
 	} else {
 		var file = Components.classes["@mozilla.org/file/local;1"]
 					.createInstance(Components.interfaces.nsILocalFile);
 		file.initWithPath(filePath);
-		less._fileCache[_fileUri] = file;
+		_fileCache[_fileUri] = file;
 	}
 	
-	return less._fileCache[_fileUri];
+	return _fileCache[_fileUri];
 }
 
 var writeFile = function(file, data) {
@@ -3973,10 +3993,12 @@ var writeFile = function(file, data) {
 //
 // Get all <link> tags with the 'rel' attribute set to "stylesheet/less"
 //
+var _sheetIdMap = {};
 var typePattern = /^text\/(x-)?less$/;
 
 less.variables = {};
 less.variableStorage = {};
+less.sheetParents = {};
 
 less.context = null;
 less.contextStorage = null;
@@ -4062,8 +4084,7 @@ less.inject = function(lessCss) {
 };
 
 less.updateVariables = function(variables, sheetUrl) {
-	var sheetUpdates = {};
-	var len = 0;
+	var sheetUpdates = {length: 0};
 	
 	// Iterate through variables and filter out the sheets that are affected
 	for (var name in variables) {
@@ -4073,88 +4094,64 @@ less.updateVariables = function(variables, sheetUrl) {
 		
 		// Get sheet id's that are connected to this varialble
 		var sheets = less.variables[name];
+		var sheetUpdates = [];
 		
 		for (var sheetId in sheets) {
-			if ( ! sheets.hasOwnProperty(sheetId) || typeof less.contextStorage.sheetmap[sheetId] == 'undefined') {
+			var sheet = getSheet(sheetId)
+			if ( ! sheet) continue;
+			
+			if (sheetUrl && sheet.href.indexOf(sheetUrl) === -1) { // If a sheet url was defined only process sheets that have a matching url
 				continue;
 			}
 			
-			if (sheetUrl) { // If a sheet url was defined only process sheets that have a matching url
-				var _sheet = less.contextStorage.sheetmap[sheetId];
-				if ( ! _sheet || _sheet.href.indexOf(sheetUrl) === -1) {
-					continue;
-				}
+			if (typeof less.variableStorage[sheetId] == 'undefined') {
+				less.variableStorage[sheetId] = {};
 			}
 			
-			if (typeof sheetUpdates[sheetId] == 'undefined')
-			{
-				sheetUpdates[sheetId] = {sheet: less.contextStorage.sheetmap[sheetId], variables: {}};
-				
-				if (typeof less.variableStorage[sheetId] !== 'undefined') {
-					sheetUpdates[sheetId].variables = less.variableStorage[sheetId];
-				}
-				
-				len++;
-			}
-			
-			sheetUpdates[sheetId].variables[name] = variables[name];
+			less.variableStorage[sheetId][name] = variables[name];
+			sheetUpdates.push(sheetId);
 		}
-		
 	}
 	
-	var updateSheet = function(id, sheetUpdate) {
-		less.variableStorage[id] = sheetUpdate.variables;
-		var sheet 		= sheetUpdate.sheet;
-		var contents  	= sheet.contents || {}; 
-		var href 		= sheet.href;
-		
-		xhr(href, function(css) {
-			css = injectVariables(sheetUpdate.variables, css);
-			
-			try {
-				contents[href] = css;
-				new(less.Parser)({
-					optimization: less.optimization,
-					paths: [sheet.href.replace(/[\w\.-]+$/, '')],
-					mime: sheet.type,
-					filename: href,
-					sheet: sheet,
-					'contents': contents,
-					dumpLineNumbers: less.dumpLineNumbers
-				}).parse(css, function (e, root) {
-					if (e) { return error(e, href) }
-					try {
-						createCSS(root.toCSS(), sheet);
-					} catch (e) {
-						error(e, href);
-					}
-				});
-			} catch (e) {
-				error(e, href);
-			}
-		});
-	}
-
-	// Iterate though sheets an update (recompile) them with new variables
-	for (var id in sheetUpdates) {
-		if ( ! sheetUpdates.hasOwnProperty(id)) {
-			continue;
+	var getTopParents = function(sheetId, result) {
+		if (result === undefined) result = [];
+		if (typeof less.sheetParents[sheetId] == 'undefined') {
+			result.push(sheetId);
+			return result;
 		}
 		
-		updateSheet(id, sheetUpdates[id]);
+		var parents = less.sheetParents[sheetId];
+		for (var k in parents) {
+			if (parents.hasOwnProperty(k)) {
+				result = getTopParents(k, result);
+			}
+		}
+		
+		return result;
+	}
+	
+	var callback = function(e, root, _, sheet, env) {
+		if (root) {
+			createCSS(root.toCSS(), sheet, env.lastModified);
+		}
+	}
+	
+	// Iterate though sheets an update (recompile) them with new variables
+	for (var i=0;i<sheetUpdates.length;i++) {
+		var parents = getTopParents(sheetUpdates[[i]]);
+		
+		for (var x=0;x<parents.length;x++) {
+			var sheet = getSheet(parents[x]);
+			loadStyleSheet(sheet, callback, false, 0, true);
+		}
 	}
 }
 
 var _init = function() {
-	if (cache && cache.getItem('lessVariables')) {
-		var _variables = cache.getItem('lessVariables');
-		
-		for (var k in _variables) {
-			if (_variables.hasOwnProperty(k)) {
-				less.variables[k] = _variables[k];
-			}
-		}
-	}
+	less.variables = extend(less.variables, cache.getItem('lessVariables'));
+	less.sheetParents = extend(less.sheetParents, cache.getItem('lessSheetParents'));
+	_sheetIdMap = extend(_sheetIdMap, cache.getItem('lessSheetIdMap'));
+	less.variableStorage = extend(less.variableStorage, cache.getItem('lessVariableStorage'));
 	
 	less.restoreContext();
 	less.refresh(less.env === 'development');
@@ -4194,7 +4191,7 @@ function loadStyleSheets(callback, reload) {
     }
 }
 
-function loadStyleSheet(sheet, callback, reload, remaining) {
+function loadStyleSheet(sheet, callback, reload, remaining, noCache) {
     var contents  = sheet.contents || {};  // Passing a ref to top importing parser content cache trough 'sheet' arg.
     var url       = window.location.href.replace(/[#?].*$/, '');
     var href      = sheet.href.replace(/\?.*$/, '');
@@ -4202,12 +4199,19 @@ function loadStyleSheet(sheet, callback, reload, remaining) {
 	var file 		= getFile(href);
 	var cacheFile 	= getFile(href, true);
 	
-	if (cacheFile.exists() && file.exists() && cacheFile.lastModifiedTime > file.lastModifiedTime) {
+	if (noCache !== true && cacheFile.exists() && file.exists() &&
+		cacheFile.lastModifiedTime > file.lastModifiedTime) {
 		insertCss(sheet, cacheFile.path);
 		return callback(null, null, null, sheet, { local: true, remaining: remaining });
 	}
 	
 	xhr(sheet.href, function (data, lastModified) {
+		// Inject dynamic variables
+		var id = extractIdFromSheet(sheet);
+		if (typeof less.variableStorage[id] != 'undefined') {
+			data = injectVariables(less.variableStorage[id], data);
+		}
+		
 		// Use remote copy (re-parse)
 		try {
 			contents[href] = data;  // Updating top importing parser content cache
@@ -4234,17 +4238,21 @@ function loadStyleSheet(sheet, callback, reload, remaining) {
 }
 
 function extractId(href) {
-    return href.replace(/^[a-z]+:\/\/?[^\/]+/, '' )  // Remove protocol & domain
-               .replace(/^\//,                 '' )  // Remove root /
-               .replace(/\?.*$/,               '' )  // Remove query
-               .replace(/\.[^\.\/]+$/,         '' )  // Remove file extension
-               .replace(/[^\.\w-]+/g,          '-')  // Replace illegal characters
-               .replace(/\./g,                 ':'); // Replace dots with colons(for valid id)
+    var id = 'less:' + (href
+            .replace(/^[a-z]+:\/\/?/,       '' )  // Remove protocol & domain
+            .replace(/(?:^\/|\/$)/,         '' )  // Remove root /
+            .replace(/\?.*$/,               '' )  // Remove query
+            .replace(/\.[^\.\/]+$/,         '' )  // Remove file extension
+            .replace(/[^\.\w-]+/g,          '-')  // Replace illegal characters
+            .replace(/\./g,                 ':')); // Replace dots with colons(for valid id)
+	
+    _sheetIdMap[id] = href;
+    return id;
 }
 
 function extractIdFromSheet(sheet) {
 	var href = sheet.href ? sheet.href.replace(/\?.*$/, '') : '';
-	return 'less:' + extractId(href);
+	return extractId(href);
 }
 
 function injectVariables(variables, css) {
@@ -4270,9 +4278,18 @@ function injectVariables(variables, css) {
 	return css;
 }
 
-function createCSS(styles, sheet) {
-    if ( ! sheet.nodeName.match(/link|xml-stylesheet/i)) return;
+function reloadCSS(sheet) {
+	if ( sheet.previousSibling === undefined || ! sheet.nodeName.match(/link|xml-stylesheet/i)) return;
+	
+	var sibling = sheet.previousSibling;
+	var id = extractIdFromSheet(sheet);
+	var ts = Math.round((new Date()).getTime() / 1000);
+	if (sibling.nodeValue.indexOf(id) !== -1) {
+		sibling.nodeValue = sibling.nodeValue.replace(/\?.*?"/i, '?t='+ts+'"');
+	}
+}
 
+function createCSS(styles, sheet) {
     // Strip the query-string
     var href = sheet.href ? sheet.href.replace(/\?.*$/, '') : '';
 	
@@ -4282,7 +4299,7 @@ function createCSS(styles, sheet) {
 		log('Reverting to inline styling');
 		var fileUri = 'data:text/css,' + encodeURIComponent(styles);
 	} else {
-		var fileUri = file.path;
+		var fileUri = file.path + '?t=' + file.lastModifiedTime;
 	}
 	
 	insertCss(sheet, fileUri);
@@ -4291,6 +4308,9 @@ function createCSS(styles, sheet) {
 	log('saving ' + href + ' to cache.');
 	try {
 		cache.setItem('lessVariables', less.variables);
+		cache.setItem('lessSheetParents', less.sheetParents);
+		cache.setItem('lessSheetIdMap', _sheetIdMap);
+		cache.setItem('lessVariableStorage', less.variableStorage);
 	} catch(e) {
 		//TODO - could do with adding more robust error handling
 		log('failed to save');
@@ -4298,6 +4318,8 @@ function createCSS(styles, sheet) {
 }
 
 function insertCss(sheet, fileUri) {
+	if ( sheet.nodeName === undefined || ! sheet.nodeName.match(/link|xml-stylesheet/i)) return;
+	
     // If there is no title set, use the filename, minus the extension
     var id = extractIdFromSheet(sheet);
 	var sibling = sheet.previousSibling || {};
@@ -4322,19 +4344,6 @@ function xhr(url, callback) {
         var data = NetUtil.readInputStreamToString(inputStream, inputStream.available());
         return callback(data);
     });
-}
-
-function getXMLHttpRequest() {
-    if (window.XMLHttpRequest) {
-        return new(XMLHttpRequest);
-    } else {
-        try {
-            return new(ActiveXObject)("MSXML2.XMLHTTP.3.0");
-        } catch (e) {
-            log("browser doesn't support AJAX.");
-            return null;
-        }
-    }
 }
 
 function removeNode(node) {
@@ -4379,6 +4388,24 @@ function error(e, href) {
     }
 	
 	dump(errorString);
+}
+
+/*
+* Recursively merge properties of two objects 
+*/
+function extend(obj1, obj2) {
+    for (var p in obj2) {
+        try {
+            if (obj2[p].constructor == Object) {
+                obj1[p] = MergeRecursive(obj1[p], obj2[p]);
+            } else {
+                obj1[p] = obj2[p];
+            }
+        } catch (e) {
+            obj1[p] = obj2[p];
+        }
+    }
+    return obj1;
 }
 
 // amd.js
