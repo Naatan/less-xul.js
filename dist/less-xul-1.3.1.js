@@ -220,15 +220,19 @@ less.Parser = function Parser(env) {
             var that = this;
             this.queue.push(path);
             
-            // Record parent
+            // Record hierarchy
             var pId = extractIdFromSheet(env.sheet);
             var id  = extractId(path);
             
-            if (typeof less.sheetParents[id] == 'undefined') {
-                less.sheetParents[id] = {};
+            if (typeof less.sheetHierarchy.parents[id] == 'undefined') {
+                less.sheetHierarchy.parents[id] = {};
+            }
+            if (typeof less.sheetHierarchy.children[pId] == 'undefined') {
+                less.sheetHierarchy.children[pId] = {};
             }
             
-            less.sheetParents[id][pId] = true;
+            less.sheetHierarchy.parents[id][pId] = true;
+            less.sheetHierarchy.children[pId][id] = true;
 
             //
             // Import a file asynchronously
@@ -3962,6 +3966,39 @@ var getFile = function(fileUri, cache) {
 	return _fileCache[_fileUri];
 }
 
+var getFileFromSheetId = function(sheetId, cache) {
+	var sheet = getSheet(sheetId);
+	return getFile(sheet.href, cache);
+}
+
+var _youngestChild = {};
+var getYoungestChild = function(href) {
+	var parentFile = getFile(href);
+	var sheetId = extractId(href);
+	
+	if (typeof _youngestChild[sheetId] != 'undefined') return _youngestChild[sheetId];
+	
+	var youngest = {file: parentFile, id: sheetId};
+	if (typeof less.sheetHierarchy.children[sheetId] != 'undefined') {
+		var children = less.sheetHierarchy.children[sheetId];
+		for (var k in children) {
+			var file = getFileFromSheetId(k);
+			if (file && file.exists() && youngest.file.exists() &&
+				file.lastModifiedTime > youngest.file.lastModifiedTime) {
+				youngest.file = file;
+				youngest.id = k;
+			}
+		}
+	}
+	
+	if (youngest.id != sheetId) {
+		return getYoungestChild(getSheet(youngest.id).href);
+	} else {
+		_youngestChild[sheetId] = youngest.file;
+		return youngest.file;
+	}
+}
+
 var writeFile = function(file, data) {
 	try {
 		if ( ! file.exists()) {
@@ -3998,7 +4035,7 @@ var typePattern = /^text\/(x-)?less$/;
 
 less.variables = {};
 less.variableStorage = {};
-less.sheetParents = {};
+less.sheetHierarchy = {parents: {}, children: {}};
 
 less.context = null;
 less.contextStorage = null;
@@ -4115,12 +4152,12 @@ less.updateVariables = function(variables, sheetUrl) {
 	
 	var getTopParents = function(sheetId, result) {
 		if (result === undefined) result = [];
-		if (typeof less.sheetParents[sheetId] == 'undefined') {
+		if (typeof less.sheetHierarchy.parents[sheetId] == 'undefined') {
 			result.push(sheetId);
 			return result;
 		}
 		
-		var parents = less.sheetParents[sheetId];
+		var parents = less.sheetHierarchy.parents[sheetId];
 		for (var k in parents) {
 			if (parents.hasOwnProperty(k)) {
 				result = getTopParents(k, result);
@@ -4149,7 +4186,7 @@ less.updateVariables = function(variables, sheetUrl) {
 
 var _init = function() {
 	less.variables = extend(less.variables, cache.getItem('lessVariables'));
-	less.sheetParents = extend(less.sheetParents, cache.getItem('lessSheetParents'));
+	less.sheetHierarchy = extend(less.sheetHierarchy, cache.getItem('lessSheetHierarchy'));
 	_sheetIdMap = extend(_sheetIdMap, cache.getItem('lessSheetIdMap'));
 	less.variableStorage = extend(less.variableStorage, cache.getItem('lessVariableStorage'));
 	
@@ -4196,14 +4233,18 @@ function loadStyleSheet(sheet, callback, reload, remaining, noCache) {
     var url       = window.location.href.replace(/[#?].*$/, '');
     var href      = sheet.href.replace(/\?.*$/, '');
 	
-	var file 		= getFile(href);
+	var file 		= getYoungestChild(href);
 	var cacheFile 	= getFile(href, true);
+	
+	//ko.logging.dumpImportant(file.path + ' - ' + cacheFile.path);
 	
 	if (noCache !== true && cacheFile.exists() && file.exists() &&
 		cacheFile.lastModifiedTime > file.lastModifiedTime) {
 		insertCss(sheet, cacheFile.path);
 		return callback(null, null, null, sheet, { local: true, remaining: remaining });
 	}
+	
+	ko.logging.dumpImportant(sheet.href);
 	
 	xhr(sheet.href, function (data, lastModified) {
 		// Inject dynamic variables
@@ -4308,7 +4349,7 @@ function createCSS(styles, sheet) {
 	log('saving ' + href + ' to cache.');
 	try {
 		cache.setItem('lessVariables', less.variables);
-		cache.setItem('lessSheetParents', less.sheetParents);
+		cache.setItem('lessSheetHierarchy', less.sheetHierarchy);
 		cache.setItem('lessSheetIdMap', _sheetIdMap);
 		cache.setItem('lessVariableStorage', less.variableStorage);
 	} catch(e) {
